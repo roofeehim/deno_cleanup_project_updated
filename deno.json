@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "clean": "deno run --allow-read --allow-write --import-map=import_map.json cleanup.ts"
+  },
+  "importMap": "./import_map.json"
+}
