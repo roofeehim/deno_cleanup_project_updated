@@ -2,5 +2,8 @@
   "tasks": {
     "clean": "deno run --allow-read --allow-write --import-map=import_map.json cleanup.ts"
   },
-  "importMap": "./import_map.json"
+  "imports": {
+    "fs/": "https://deno.land/std@0.104.0/fs/",
+    "path/": "https://deno.land/std@0.104.0/path/"
+  }
 }

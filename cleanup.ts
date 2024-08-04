@@ -1,79 +1,86 @@
-import { walk } from "https://deno.land/std@0.224.0/fs/walk.ts";
 import { existsSync } from "https://deno.land/std@0.224.0/fs/exists.ts";
-import { join, dirname } from "https://deno.land/std@0.224.0/path/mod.ts";
+import { join, dirname, relative, normalize } from "https://deno.land/std@0.224.0/path/mod.ts";
 
-// ファイルリストを読み込む関数
 async function readFileList(filePath: string): Promise<Set<string>> {
   const data = await Deno.readTextFile(filePath);
-  const dirPath = Deno.cwd();
-  return new Set(data.split("\n").map(line => join(dirPath, line.trim())).filter(line => line !== ""));
+  return new Set(data.split("\n").map(line => normalize(line.trim())).filter(line => line !== ""));
 }
 
-// リストに含まれるディレクトリかどうかを確認する関数
-function isDirectoryInFileList(directory: string, fileList: Set<string>): boolean {
+function isFileInList(filePath: string, fileList: Set<string>, baseDir: string): boolean {
+  const relativePath = normalize(relative(baseDir, filePath));
+  const fileName = relativePath.split("/").pop() || "";
+  const isInList = fileList.has(fileName);
+  console.log(`Checking file: ${filePath}`);
+  console.log(`Relative path: ${relativePath}`);
+  console.log(`File name: ${fileName}`);
+  console.log(`Is in list: ${isInList}`);
+  return isInList;
+}
+
+function isDirectoryInFileList(directory: string, fileList: Set<string>, baseDir: string): boolean {
+  const relativeDir = normalize(relative(baseDir, directory));
   for (const filePath of fileList) {
-    if (dirname(filePath).startsWith(directory)) {
+    if (relativeDir.endsWith(dirname(filePath))) {
       return true;
     }
   }
   return false;
 }
 
-// ディレクトリを再帰的にチェックして、リストにないファイルを削除する関数
-async function cleanDirectory(directory: string, fileList: Set<string>) {
-  for await (const entry of walk(directory, { includeDirs: false, followSymlinks: false })) {
-    if (!fileList.has(entry.path) && entry.name !== 'cleanup.ts' && entry.name !== 'file_list.txt') {
-      console.log(`Deleting: ${entry.path}`);
-      await Deno.remove(entry.path);
-    }
-  }
-
-  // 空のディレクトリも削除するが、リストに含まれるファイルがあるディレクトリは削除しない
-  for await (const entry of walk(directory, { includeDirs: true, followSymlinks: false })) {
-    if (existsSync(entry.path)) {
-      const stat = await Deno.stat(entry.path);
-      if (stat.isDirectory) {
-        const files = [...Deno.readDirSync(entry.path)];
-        if (files.length === 0 && !isDirectoryInFileList(entry.path, fileList)) {
-          console.log(`Deleting empty directory: ${entry.path}`);
-          await Deno.remove(entry.path);
-        }
+async function cleanDirectory(dir: string, fileList: Set<string>, baseDir: string) {
+  for await (const entry of Deno.readDir(dir)) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isFile && !isFileInList(fullPath, fileList, baseDir)) {
+      await Deno.remove(fullPath);
+      console.log(`削除されたファイル: ${fullPath}`);
+    } else if (entry.isDirectory) {
+      if (!isDirectoryInFileList(fullPath, fileList, baseDir)) {
+        await Deno.remove(fullPath, { recursive: true });
+        console.log(`削除されたディレクトリ: ${fullPath}`);
+      } else {
+        await cleanDirectory(fullPath, fileList, baseDir);
       }
     }
   }
 }
 
-// メイン関数
 async function main() {
   try {
-    const execDir = dirname(Deno.execPath());
-    const fileListPath = join(execDir, "file_list.txt");
+    const execDir = Deno.cwd();
+    const fileListPath = "./file_list.txt";
+    const targetDir = join(execDir, "target");
     
     if (!existsSync(fileListPath)) {
       throw new Error(`file_list.txt が ${execDir} に見つかりません。`);
     }
 
+    if (!existsSync(targetDir)) {
+      throw new Error(`target ディレクトリが ${execDir} に見つかりません。`);
+    }
+
     console.log("ファイルリストを読み込んでいます...");
     const fileList = await readFileList(fileListPath);
     console.log(`${fileList.size} 個のファイルがリストに含まれています。`);
+    console.log("ファイルリストの内容:");
+    fileList.forEach(file => console.log(file));
 
     const targetDirs = [];
-    for (const entry of Deno.readDirSync(execDir)) {
-      if (entry.isDirectory && entry.name !== "." && entry.name !== "..") {
-        targetDirs.push(join(execDir, entry.name));
+    for (const entry of Deno.readDirSync(targetDir)) {
+      if (entry.isDirectory) {
+        targetDirs.push(join(targetDir, entry.name));
       }
     }
 
     if (targetDirs.length === 0) {
-      console.log("対象ディレクトリが見つかりません。");
+      console.log("target ディレクトリ内に対象ディレクトリが見つかりません。");
       return;
     }
 
-    for (const targetDir of targetDirs) {
-      console.log(`対象ディレクトリ: ${targetDir}`);
+    for (const dir of targetDirs) {
+      console.log(`対象ディレクトリ: ${dir}`);
       console.log("クリーンアップを開始します...");
-      await cleanDirectory(targetDir, fileList);
-      console.log(`${targetDir} のクリーンアップが完了しました。`);
+      await cleanDirectory(dir, fileList, targetDir);
+      console.log(`${dir} のクリーンアップが完了しました。`);
     }
 
     console.log("すべての処理が完了しました。");
@@ -83,7 +90,6 @@ async function main() {
   }
 }
 
-// スクリプトの実行
 if (import.meta.main) {
   await main();
 }
