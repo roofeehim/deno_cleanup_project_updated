@@ -1,44 +1,35 @@
 import { existsSync } from "https://deno.land/std@0.224.0/fs/exists.ts";
-import { join, dirname, relative, normalize } from "https://deno.land/std@0.224.0/path/mod.ts";
+import { join, relative, normalize } from "https://deno.land/std@0.224.0/path/mod.ts";
+import { basename } from "https://deno.land/std@0.224.0/path/mod.ts";
 
 async function readFileList(filePath: string): Promise<Set<string>> {
   const data = await Deno.readTextFile(filePath);
   return new Set(data.split("\n").map(line => normalize(line.trim())).filter(line => line !== ""));
 }
 
-function isFileInList(filePath: string, fileList: Set<string>, baseDir: string): boolean {
-  const relativePath = normalize(relative(baseDir, filePath));
-  const fileName = relativePath.split("/").pop() || "";
-  const isInList = fileList.has(fileName);
-  console.log(`Checking file: ${filePath}`);
-  console.log(`Relative path: ${relativePath}`);
-  console.log(`File name: ${fileName}`);
-  console.log(`Is in list: ${isInList}`);
-  return isInList;
-}
-
-function isDirectoryInFileList(directory: string, fileList: Set<string>, baseDir: string): boolean {
-  const relativeDir = normalize(relative(baseDir, directory));
-  for (const filePath of fileList) {
-    if (relativeDir.endsWith(dirname(filePath))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 async function cleanDirectory(dir: string, fileList: Set<string>, baseDir: string) {
   for await (const entry of Deno.readDir(dir)) {
     const fullPath = join(dir, entry.name);
-    if (entry.isFile && !isFileInList(fullPath, fileList, baseDir)) {
-      await Deno.remove(fullPath);
-      console.log(`削除されたファイル: ${fullPath}`);
-    } else if (entry.isDirectory) {
-      if (!isDirectoryInFileList(fullPath, fileList, baseDir)) {
-        await Deno.remove(fullPath, { recursive: true });
-        console.log(`削除されたディレクトリ: ${fullPath}`);
+    const relativePath = relative(baseDir, fullPath);
+
+    if (entry.isFile) {
+      const fileName = basename(relativePath);
+      console.log(`チェック中のファイル: ${relativePath}`);
+      const shouldKeep = fileList.has(fileName);
+      if (!shouldKeep) {
+        await Deno.remove(fullPath);
+        console.log(`削除されたファイル: ${fullPath}`);
       } else {
-        await cleanDirectory(fullPath, fileList, baseDir);
+        console.log(`保持されたファイル: ${fullPath}`);
+      }
+    } else if (entry.isDirectory) {
+      await cleanDirectory(fullPath, fileList, baseDir);
+      
+      // ディレクトリが空になったら削除
+      const isEmpty = (await Array.fromAsync(Deno.readDir(fullPath))).length === 0;
+      if (isEmpty) {
+        await Deno.remove(fullPath);
+        console.log(`削除された空のディレクトリ: ${fullPath}`);
       }
     }
   }

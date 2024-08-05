@@ -1,1 +1,4 @@
-file1.txt
+style.css
+main.ts
+app.js
+README.md
